@@ -1,0 +1,323 @@
+select * from students_data;
+ select * from exam_data;
+   select * from updated_data;
+     
+   --TASK1
+     Bir package qurun: Prosedurda asagidakilar olsun;
+--  1. Gender male və ya female-dən fərqli olarsa gender is not entered correctly errorunu çıxarın. 
+--  2. Yaş 18-dən kiçik olarsa yaş age must be greater than 18 errorunu çıxarın.
+--  3. Telefon nömrəsi yalnız Azerbaycan mobil telefon formatında qeyd edilsin.
+--  Bundan fərqli formatlardadırsa error qaytarın (düzgün format +994111111111) .(regexp araşdırılıb tətbiq edilməlidir)
+--  4. Prosedur anadan olma datası-na əsasən avtomatik olaraq yaşı hesablayıb cədvələ yazsın. 
+
+    
+
+create or replace package students_package1 is
+  procedure set_gender_data(v_student_id in number);
+  procedure set_data_age(v_student_id in number);
+  procedure set_phone_number(v_student_id in number);
+  procedure set_procedure_age;
+end students_package1;
+
+
+create or replace package body students_package1 is
+procedure set_gender_data(v_student_id number) is
+v_gender students_data.gender%type;
+begin
+select s.gender into v_gender from students_data s where s.students_id = v_student_id;
+
+if v_gender not in ('F', 'M') then raise_application_error(-20001, 'Gender is not entered correctly');
+end if;
+end set_gender_data;
+
+
+
+
+procedure set_data_age(v_student_id in number) is
+v_age number;
+begin
+select s.age into v_age from students_data s where s.students_id = v_student_id;
+
+if v_age < 18 then raise_application_error(-20001, 'Age must be greater than 18');
+end if;
+end set_data_age;
+
+
+
+
+procedure set_phone_number(v_student_id in number) is
+v_phone_number students_data.phone_number%type;
+
+begin
+select s.phone_number into v_phone_number from students_data s where s.students_id = v_student_id;
+
+if not regexp_like(v_phone_number, '^(\+994|994|0)(50|51|55|70|77)[1-9][0-9]{6}$') then raise_application_error(-20001, 'yanlis telefon nomresidir');
+end if;
+end set_phone_number;
+
+
+
+
+procedure set_procedure_age is
+begin
+for i in (select s.students_id, s.date_of_birth from students_data s) 
+  loop 
+    update students_data set age = abs(trunc(months_between(sysdate, i.date_of_birth)
+/12)) where students_id = i.students_id;
+end loop; commit;
+end set_procedure_age;
+
+
+
+end students_package1;
+
+
+
+
+
+begin
+ -- students_package1.set_gender_data(v_student_id => 50);
+ -- students_package1.set_data_age(v_student_id => 199);
+  students_package1.set_phone_number(v_student_id => 45);
+ -- students_package1.set_procedure_age;
+end;
+
+-------------------------------------------------------------------------------------------------------------------------
+--TASK2
+	Tələbələrin yığdıqları balı göstərmək üçüb funksiya yazın.  
+    Burada ötürülən id-li tələbənin ümumi olaraq yığdığı ortalama nəticə ekrana çıxsın.
+      Əgər tələbə mövcud deyilsə ekrana Tələbə tapılmadı erroru çıxsın. 
+        Əgər tələbə varsa nəticəsi yoxdursa ekrana Tələbənin nəticəsi tapılmadı erroru çıxsın.
+    
+   
+   create or replace function student_average_score (s_id number)
+return number is
+  v_average_score number;
+begin
+  select trunc((math_score + reading_score + writing_score) / 3) as avg_score 
+  into v_average_score
+  from exam_data
+  where student_id = s_id;
+
+  return v_average_score;
+exception
+  when no_data_found then
+    raise_application_error(-20001, 'telebe tapılmadi');
+  when others then
+    raise_application_error(-20002, 'telebenin neticesi tapilmadi ' || sqlerrm);
+end student_average_score;
+
+
+
+select student_average_score(66) as avg_score from dual;
+ 
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------------------
+--TASK3
+  	Ortalama balı 50-dən aşağı olan tələbələrin statusu failed olaraq qeyd edilsin 
+       və həmin tələbələrin dataları əsas cədvəldən silinib arxiv cədvəldə saxlansın (bunun üçün hər gün saat 9-da işləyən job qurun) 
+
+create or replace procedure set_students_archieve is
+  v_student_id exam_data.student_id%type;
+  v_math_score exam_data.math_score%type;
+  v_reading_score exam_data.reading_score%type;
+  v_writing_score exam_data.writing_score%type;
+  v_failed students_data.students_failed%type;
+begin
+  for i in (select e.student_id, trunc((e.math_score + e.reading_score + e.writing_score) / 3) as avg_score
+            from exam_data e)
+  loop
+    if i.avg_score < 50 then
+      update students_data s set s.students_failed = 'failed' where s.students_id = i.student_id;
+
+      select e.student_id, e.math_score, e.reading_score, e.writing_score, 'failed'
+      into v_student_id, v_math_score, v_reading_score, v_writing_score, v_failed
+      from exam_data e
+      where e.student_id = i.student_id;
+
+      insert into students_archieve (student_id, math_score, reading_score, writing_score, failed)
+      values (v_student_id, v_math_score, v_reading_score, v_writing_score, v_failed);
+
+      delete from students_data s where s.students_id = i.student_id;
+    end if;
+  end loop;
+end set_students_archieve;
+
+
+
+
+begin
+  set_students_archieve;
+end;
+   
+   
+ 
+
+create table students_archieve ( student_id number,
+                                 math_score number,
+                                 reading_score number,
+                                 writing_score number,
+                                 failed varchar2(50));
+
+select * from students_archieve
+
+
+
+
+
+begin
+   dbms_scheduler.create_job ( job_name            => 'STUDENT_JOB_ARCIEVE1' ,
+                               job_type            => 'PLSQL_BLOCK' ,
+                               job_action          => 'BEGIN set_students_archieve; END;',
+                               start_date          =>  SYSTIMESTAMP,
+                               repeat_interval     => 'FREQ=DAILY;BYHOUR=9',
+                               enabled             => TRUE);
+end;
+                            
+
+
+                               
+                               
+          select job_name, enabled, start_date, repeat_interval  from dba_scheduler_jobs where  job_name = 'STUDENT_JOB_ARCIEVE1';
+                            
+ ----------------------------------------------------------------------------------------------------------------------------------
+ 
+--TASK4
+          Hər bir şəhərdən olan tələbələrin sayını çıxaran report yazın. Report cinsə görə bölünməlidir
+
+
+
+  declare
+    cursor students_cursor is
+      select s.adress, s.gender, count(*) as student_count
+        from students_data s
+       group by s.adress, s.gender
+       order by s.adress, s.gender;
+    v_city          students_data.adress%type;
+    v_gender        students_data.gender%type;
+    v_student_count number;
+  begin
+    open students_cursor;
+    dbms_output.put_line('telebelerin seherlere ve cinse gore sayi');
+    dbms_output.put_line('seher  |  cins  |  telebe sayi');
+    dbms_output.put_line('----------------');
+  
+    loop
+      fetch students_cursor
+        into v_city, v_gender, v_student_count;
+      exit when students_cursor%notfound;
+    
+      dbms_output.put_line(rpad(v_city, 10) || ' | ' || rpad(v_gender, 6) ||
+                           ' | ' || v_student_count);
+    end loop;
+  
+    close students_cursor;
+  end;
+     
+--------------------------------------------------------------------------------------------------------------------
+
+--TASK5   
+  	Imtahan nəticəsi olmayan tələbələri tapan və status sütununa failed yazan prosedur qurun.     
+
+
+ create or replace procedure set_imtahan_neticesi is
+  begin
+    update students_data s
+       set s.students_failed = 'failed'
+     where s.students_id not in (select e.student_id from exam_data e);
+  end set_imtahan_neticesi;
+
+    
+    begin
+      set_imtahan_neticesi;
+    end;
+    
+    
+    
+      select * from students_data
+    
+-------------------------------------------------------------------------------------------------------
+
+--TASK6
+	Exceldə verilən update etmək üçün datalardan istifadə edərək köhnə dataları əvəzləyin  
+    
+  
+  merge into students_data 
+ using updated_data 
+ on ( students_data.students_id = updated_data.studenst_id)
+  when matched then update set
+    students_data.first_name = updated_data.first_name,
+    students_data.last_name = updated_data.last_name,
+    students_data.date_of_birth = updated_data.date_of_birth,
+    students_data.gender = updated_data.gender,
+    students_data.adress = updated_data.adress;
+    
+   select * from students_data s where s.students_id=909;
+ 
+   select * from updated_data u where u.studenst_id=909;
+  
+  
+  
+  
+-------------------------------------------------------------------------------------------
+
+--TASK7
+  	Hər bir ildə neçə və hər fəsildə neçə nəfər tələbə anadan olduğunu tapan report hazırlayın
+ və explain planı prezentasiyaya əlavə edin.
+ 
+ 
+ 
+ select case
+          when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+               (3, 4, 5) then
+           'yaz'
+          when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+               (6, 7, 8) then
+           'yay'
+          when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+               (9, 10, 11) then
+           'payiz'
+          else
+           'qis'
+        end as fesil,
+        extract(year from to_date(date_of_birth, 'dd-mm-yyyy')) as birth_year,
+        count(*) as s_count
+   from students_data
+  group by case
+             when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+                  (3, 4, 5) then
+              'yaz'
+             when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+                  (6, 7, 8) then
+              'yay'
+             when extract(month from to_date(date_of_birth, 'dd-mm-yyyy')) in
+                  (9, 10, 11) then
+              'payiz'
+             else
+              'qis'
+           end,
+           extract(year from to_date(date_of_birth, 'dd-mm-yyyy'))
+  order by fesil, birth_year;
+  
+
+------------------------------------------------------------------------------------------------------
+
+--TASK8
+ 	Emaillərdə ad və soyadlar iştirak etməlidir. Bu standarta uyğun gəlməyən tələbələri ekrana çıxarın 
+ 
+ 
+ 
+ select email from students_data where email not like '%' || first_name || '%' 
+ and email not like '%' || last_name || '%' and email is not null;
+
+ 
+ 
+ insert into students_data (students_id,first_name,last_name,date_of_birth,gender,email) values ( 99,'asif','eliyev','12.06.2020','M','as124yev');
+ 
+  select * from students_data s where s.students_id=99
+  
+  
+
